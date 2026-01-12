@@ -140,9 +140,9 @@ async def upload_image(file: UploadFile = File(...)) -> JSONResponse:
                 "uploaded": True,
                 "name": None,
                 "lore": None,
-                "weakness_filepath": None,
-                "resistance_filepath": None,
-                "moves_filepath": None,
+                "weakness": None,
+                "resistance": None,
+                "moves": None,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }

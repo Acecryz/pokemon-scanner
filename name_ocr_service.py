@@ -38,7 +38,7 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploaded_images"))
 # Crop box for name region: (left, upper, right, lower)
 # These are defaults and likely need adjustment per card layout.
 # Example values target a top area where the name typically appears.
-CROP_BOX = tuple(int(x) for x in os.getenv("NAME_CROP_BOX", "40,10,460,80").split(","))
+CROP_BOX = tuple(int(x) for x in os.getenv("NAME_CROP_BOX", "140, 40, 483, 82").split(","))
 
 RETRY_DELAY = 5.0
 
@@ -123,8 +123,16 @@ def process_record(collection, record) -> None:
     try:
         print(f"[Loading] {path}")
         with Image.open(path) as img:
-            print("[Cropping] name region")
-            cropped = crop_name_region(img, CROP_BOX)
+            # Detect card type
+            detect_crop = img.crop((469, 36, 696, 64))
+            is_trainer = "TRAINER" in pytesseract.image_to_string(detect_crop, config="--psm 6").lower()
+            print(f"DEBUG: Saving image to: {os.path.join(os.getcwd(), 'debug_trainer_zone.png')}")
+            detect_crop.save("debug_trainer_zone.png")
+            # Select box (Use CROP_BOX if standard, or your trainer coords if detected)
+            active_box = (32,76,700,135) if is_trainer else CROP_BOX
+            
+            print(f"[Cropping] {'trainer' if is_trainer else 'standard'} name region")
+            cropped = crop_name_region(img, active_box)
             print("[OCR] extracting text")
             name_text = ocr_image(cropped)
 
@@ -142,6 +150,7 @@ def process_record(collection, record) -> None:
             collection.update_one({"_id": record_id}, {"$set": {"name_error": str(e), "updated_at": datetime.utcnow()}})
         except Exception:
             print("[DB] Failed to update error field for record")
+
 
 
 def main(once: bool = False):
