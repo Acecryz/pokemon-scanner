@@ -3,7 +3,7 @@ Title OCR Service
 Extracts Pokemon title/name using Tesseract OCR
 """
 
-from ocr_service import OCRService
+from name_ocr_service import OCRService
 import os
 
 

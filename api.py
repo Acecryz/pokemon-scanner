@@ -71,7 +71,11 @@ async def startup_event():
         init_db()
     except Exception as e:
         print(f"Failed to initialize database: {str(e)}")
-        raise
+        print("WARNING: Starting API without MongoDB. Database operations will fail.")
+        print("To fix this, either:")
+        print("1. Install MongoDB: https://www.mongodb.com/try/download/community")
+        print("2. Use MongoDB Atlas: https://www.mongodb.com/cloud/atlas")
+        print("3. Set MONGODB_URI env variable with your connection string")
 
 
 @app.on_event("shutdown")

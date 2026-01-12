@@ -3,7 +3,7 @@ Weakness OCR Service
 Extracts Pokemon weakness data and saves processed image using Tesseract OCR
 """
 
-from ocr_service import OCRService
+from name_ocr_service import OCRService
 from pathlib import Path
 import os
 

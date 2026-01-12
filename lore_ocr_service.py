@@ -3,7 +3,7 @@ Lore OCR Service
 Extracts Pokemon lore/description text using Tesseract OCR
 """
 
-from ocr_service import OCRService
+from name_ocr_service import OCRService
 import os
 
 
