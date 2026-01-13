@@ -21,12 +21,16 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple
-
+import cv2
+import numpy as np
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from PIL import Image
 import pytesseract
 import re
+DEBUG_OCR = True
+DEBUG_OCR_DIR = Path("debug_ocr_inputs")
+DEBUG_OCR_DIR.mkdir(exist_ok=True)
 
 # Configuration
 POLL_INTERVAL = float(os.getenv("LORE_OCR_POLL_INTERVAL", "3"))
@@ -57,6 +61,10 @@ def connect_db(retries: int = 3, delay: float = RETRY_DELAY) -> MongoClient:
             else:
                 raise
 
+def upscale(image: Image.Image, scale: int = 2) -> Image.Image:
+    w, h = image.size
+    return image.resize((w * scale, h * scale), Image.BICUBIC)
+
 
 def find_unprocessed(collection, limit: int = 5):
     # Find records where lore is missing, null, or empty string
@@ -71,32 +79,74 @@ def find_unprocessed(collection, limit: int = 5):
 
 
 def sanitize_text(text: str) -> str:
-    """Clean OCR text, preserving newlines for multi-line lore."""
+    """
+    Clean OCR text while preserving natural punctuation and paragraph flow.
+    """
     if not text:
         return ""
-    text = text.strip()
-    # Keep letters, numbers, spaces, newlines, and common punctuation
-    text = re.sub(r"[^\w\s\n\-.,;:!?'()]", "", text)
-    # Normalize whitespace but preserve intentional line breaks
-    lines = [line.strip() for line in text.split('\n')]
-    return '\n'.join(line for line in lines if line)
+
+    # Normalize unicode punctuation to ASCII
+    text = text.replace("…", "...")
+
+    # Remove non-printable characters (keep punctuation)
+    text = re.sub(r"[^\x20-\x7E\n]", "", text)
+
+    # Normalize whitespace while preserving line breaks
+    lines = [line.strip() for line in text.split("\n")]
+
+    return "\n".join(line for line in lines if line)
+
 
 
 def crop_lore_region(img: Image.Image, box: Tuple[int, int, int, int]) -> Image.Image:
     return img.crop(box)
 
+def preprocess_for_ocr(image: Image.Image) -> Image.Image:
+    """
+    Gentle preprocessing for small serif body text.
+    Preserves thin strokes like 'i' and punctuation.
+    """
+    img = np.array(image)
+
+    if len(img.shape) == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+    # Mild denoise only
+    img = cv2.fastNlMeansDenoising(img, h=10)
+
+    # Increase contrast without destroying detail
+    img = cv2.normalize(
+        img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX
+    )
+
+    return Image.fromarray(img)
+
 
 def ocr_image(image: Image.Image) -> str:
     try:
-        # Convert to grayscale to improve OCR in many cases
-        gray = image.convert("L")
-        # Use --psm 6 for uniform block of text (multi-line lore/description)
-        config = "--psm 6"
-        text = pytesseract.image_to_string(gray, config=config)
+        # Upscale
+        image = upscale(image, scale=2)
+
+        # Preprocess
+        image = preprocess_for_ocr(image)
+
+        # DEBUG: dump final OCR input
+        if DEBUG_OCR:
+            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+            debug_path = DEBUG_OCR_DIR / f"tesseract_input_{ts}.png"
+            image.save(debug_path)
+            print(f"[DEBUG OCR] Saved OCR input → {debug_path}")
+
+        config = "--oem 3 --psm 6 -l eng"
+        text = pytesseract.image_to_string(image, config=config)
+
         return sanitize_text(text)
+
     except Exception as e:
         print(f"[OCR] Error during OCR: {e}")
         return ""
+
+
 
 
 def process_record(collection, record) -> None:
@@ -134,7 +184,7 @@ def process_record(collection, record) -> None:
             print(f"[OCR] No text extracted for {record_id}")
             collection.update_one({"_id": record_id}, {"$set": {"lore": "", "lore_error": "ocr_empty", "updated_at": datetime.utcnow()}})
         else:
-            print(f"[Extracted] {lore_text[:100]}...")  # Truncate for logging
+            print(f"[Extracted] {lore_text[:100]}")  # Truncate for logging
             collection.update_one({"_id": record_id}, {"$set": {"lore": lore_text, "updated_at": datetime.utcnow()}})
 
     except Exception as e:
