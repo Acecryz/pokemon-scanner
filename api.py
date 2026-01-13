@@ -5,9 +5,13 @@ HTTP API for image upload and Pokemon data retrieval with MongoDB backend
 
 import os
 import uuid
+import threading
+import subprocess
+import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
+from enum import Enum
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -29,6 +33,101 @@ app = FastAPI(title="Pokemon Scanner API", version="1.0.0")
 # MongoDB client and database
 mongo_client = None
 db = None
+
+
+class OCRServiceName(str, Enum):
+    """Enum for OCR service names"""
+    name = "name"
+    weakness = "weakness"
+    resistance = "resistance"
+    moves = "moves"
+    lore = "lore"
+
+
+# OCR Service Manager
+class OCRServiceManager:
+    """Manages OCR service processes"""
+    def __init__(self):
+        self.services = {
+            "name": {"process": None, "running": False},
+            "weakness": {"process": None, "running": False},
+            "resistance": {"process": None, "running": False},
+            "moves": {"process": None, "running": False},
+            "lore": {"process": None, "running": False},
+        }
+    
+    def start_service(self, service_name: str) -> bool:
+        """Start an OCR service"""
+        if service_name not in self.services:
+            return False
+        
+        if self.services[service_name]["running"]:
+            return False  # Already running
+        
+        try:
+            script_name = f"{service_name}_ocr_service.py"
+            process = subprocess.Popen(
+                [sys.executable, script_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            self.services[service_name]["process"] = process
+            self.services[service_name]["running"] = True
+            return True
+        except Exception as e:
+            print(f"Error starting {service_name} service: {e}")
+            return False
+    
+    def stop_service(self, service_name: str) -> bool:
+        """Stop an OCR service"""
+        if service_name not in self.services:
+            return False
+        
+        if not self.services[service_name]["running"]:
+            return False  # Not running
+        
+        try:
+            process = self.services[service_name]["process"]
+            if process:
+                process.terminate()
+                process.wait(timeout=5)
+            self.services[service_name]["process"] = None
+            self.services[service_name]["running"] = False
+            return True
+        except Exception as e:
+            print(f"Error stopping {service_name} service: {e}")
+            # Force kill if terminate didn't work
+            try:
+                if process:
+                    process.kill()
+            except:
+                pass
+            self.services[service_name]["process"] = None
+            self.services[service_name]["running"] = False
+            return True
+    
+    def get_status(self) -> Dict[str, bool]:
+        """Get status of all services"""
+        status = {}
+        for name, info in self.services.items():
+            # Check if process is still alive
+            if info["running"] and info["process"]:
+                if info["process"].poll() is not None:
+                    # Process has terminated
+                    info["running"] = False
+                    info["process"] = None
+            status[name] = info["running"]
+        return status
+    
+    def stop_all(self):
+        """Stop all running services"""
+        for service_name in list(self.services.keys()):
+            if self.services[service_name]["running"]:
+                self.stop_service(service_name)
+
+# Global service manager instance
+service_manager = OCRServiceManager()
 
 
 def init_db():
@@ -80,8 +179,10 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Close MongoDB connection on shutdown"""
+    """Close MongoDB connection and stop all OCR services on shutdown"""
     global mongo_client
+    # Stop all OCR services
+    service_manager.stop_all()
     if mongo_client:
         mongo_client.close()
 
@@ -298,6 +399,127 @@ async def health_check() -> JSONResponse:
             "status": "healthy",
             "service": "Pokemon Scanner API",
             "version": "1.0.0"
+        }
+    )
+
+
+@app.post("/services/{service_name}/start")
+async def start_ocr_service(service_name: OCRServiceName) -> JSONResponse:
+    """
+    Start an OCR service
+    
+    Args:
+        service_name: Name of the service (name, weakness, resistance, moves, lore)
+    
+    Returns:
+        JSON response with service status
+    """
+    service_name_str = service_name.value
+    
+    if service_manager.services[service_name_str]["running"]:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "service": service_name_str,
+                "status": "already_running",
+                "message": f"{service_name_str} OCR service is already running"
+            }
+        )
+    
+    success = service_manager.start_service(service_name_str)
+    if success:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "service": service_name_str,
+                "status": "started",
+                "message": f"{service_name_str} OCR service started successfully"
+            }
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start {service_name_str} OCR service"
+        )
+
+
+@app.post("/services/{service_name}/stop")
+async def stop_ocr_service(service_name: OCRServiceName) -> JSONResponse:
+    """
+    Stop an OCR service
+    
+    Args:
+        service_name: Name of the service (name, weakness, resistance, moves, lore)
+    
+    Returns:
+        JSON response with service status
+    """
+    service_name_str = service_name.value
+    
+    if not service_manager.services[service_name_str]["running"]:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "service": service_name_str,
+                "status": "not_running",
+                "message": f"{service_name_str} OCR service is not running"
+            }
+        )
+    
+    success = service_manager.stop_service(service_name_str)
+    if success:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "service": service_name_str,
+                "status": "stopped",
+                "message": f"{service_name_str} OCR service stopped successfully"
+            }
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to stop {service_name_str} OCR service"
+        )
+
+
+@app.get("/services/status")
+async def get_services_status() -> JSONResponse:
+    """
+    Get status of all OCR services
+    
+    Returns:
+        JSON response with status of all services
+    """
+    status_dict = service_manager.get_status()
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "services": status_dict,
+            "message": "Service status retrieved successfully"
+        }
+    )
+
+
+@app.get("/services/{service_name}/status")
+async def get_service_status(service_name: OCRServiceName) -> JSONResponse:
+    """
+    Get status of a specific OCR service
+    
+    Args:
+        service_name: Name of the service (name, weakness, resistance, moves, lore)
+    
+    Returns:
+        JSON response with service status
+    """
+    service_name_str = service_name.value
+    is_running = service_manager.services[service_name_str]["running"]
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "service": service_name_str,
+            "running": is_running,
+            "status": "running" if is_running else "stopped"
         }
     )
 

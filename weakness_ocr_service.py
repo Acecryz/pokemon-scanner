@@ -102,12 +102,17 @@ def connect_db(retries: int = 3) -> MongoClient:
 
 
 def find_unprocessed(collection, limit: int = 10):
-    """Fetch records that still need weakness data."""
+    """
+    Fetch records that need weakness data or are missing the saved crop path.
+    """
     query = {
         "$or": [
             {"weakness": None},
             {"weakness": ""},
-            {"weakness": {"$exists": False}}
+            {"weakness": {"$exists": False}},
+            {"weakness_filepath": None},
+            {"weakness_filepath": ""},
+            {"weakness_filepath": {"$exists": False}},
         ]
     }
     return list(collection.find(query).limit(limit))
@@ -249,33 +254,37 @@ def process_record(collection, record) -> None:
     try:
         with Image.open(path) as img:
             cropped = crop_weakness_region(img, CROP_BOX)
-            save_cropped_image(cropped, record_id)
-            weakness_text = ocr_image(cropped)
+            weakness_crop_path = save_cropped_image(cropped, record_id)
+
+            # Reuse existing weakness text if already present; otherwise OCR
+            existing_weakness = record.get("weakness") or ""
+            weakness_text = existing_weakness or ocr_image(cropped)
 
         if not weakness_text:
             print(f"[OCR] empty text for {record_id}")
-            collection.update_one(
-                {"_id": record_id},
-                {"$set": {
-                    "weakness": "",
-                    "weakness_color": "",
-                    "weakness_error": "ocr_empty",
-                    "updated_at": datetime.utcnow()
-                }}
-            )
+            update_fields = {
+                "weakness": "",
+                "weakness_color": "",
+                "weakness_error": "ocr_empty",
+                "updated_at": datetime.utcnow()
+            }
+            if weakness_crop_path:
+                update_fields["weakness_filepath"] = str(weakness_crop_path)
+            collection.update_one({"_id": record_id}, {"$set": update_fields})
             return
 
         weakness_color = get_weakness_color(cropped, weakness_text)
 
         print(f"[Extracted] weakness={weakness_text} color={weakness_color}")
-        collection.update_one(
-            {"_id": record_id},
-            {"$set": {
-                "weakness": weakness_text,
-                "weakness_color": weakness_color,
-                "updated_at": datetime.utcnow()
-            }}
-        )
+        update_fields = {
+            "weakness": weakness_text,
+            "weakness_color": weakness_color,
+            "weakness_error": "",
+            "updated_at": datetime.utcnow()
+        }
+        if weakness_crop_path:
+            update_fields["weakness_filepath"] = str(weakness_crop_path)
+        collection.update_one({"_id": record_id}, {"$set": update_fields})
 
     except Exception as exc:
         print(f"[Error] processing {record_id}: {exc}")
