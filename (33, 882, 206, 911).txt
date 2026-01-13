@@ -1,0 +1,22 @@
+(33, 882, 206, 911)
+
+
+X, Y, X2, Y2
+
+140, 40, 483,82
+
+
+
+TRAINER WORD DETECTION AREA
+469,36,696,64
+
+32,76,700,135
+
+
+
+import os
+print(f"DEBUG: Saving image to: {os.path.join(os.getcwd(), 'debug_trainer_zone.png')}")
+detect_crop.save("debug_trainer_zone.png")
+
+
+114 885 140 911
