@@ -124,19 +124,11 @@ def preprocess_for_ocr(image: Image.Image) -> Image.Image:
 
 def ocr_image(image: Image.Image) -> str:
     try:
-        # Upscale
+        # Upscale and Preprocess
         image = upscale(image, scale=2)
-
-        # Preprocess
         image = preprocess_for_ocr(image)
 
-        # DEBUG: dump final OCR input
-        if DEBUG_OCR:
-            ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-            debug_path = DEBUG_OCR_DIR / f"tesseract_input_{ts}.png"
-            image.save(debug_path)
-            print(f"[DEBUG OCR] Saved OCR input → {debug_path}")
-
+        # OCR Execution
         config = "--oem 3 --psm 6 -l eng"
         text = pytesseract.image_to_string(image, config=config)
 
@@ -145,7 +137,6 @@ def ocr_image(image: Image.Image) -> str:
     except Exception as e:
         print(f"[OCR] Error during OCR: {e}")
         return ""
-
 
 
 
