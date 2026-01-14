@@ -11,7 +11,7 @@ import os
 import re
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Tuple
 
@@ -88,7 +88,7 @@ def save_cropped_image(img: Image.Image, record_id) -> Path:
 # Processing logic
 # ---------------------------------------------------------------------------
 def process_record(collection, record) -> None:
-    record_id = record.get("_id") or record.get("id")
+    record_id = record.get("id") or record.get("_id")
     filename = record.get("filename")
     filepath = record.get("filepath")
 
@@ -103,8 +103,8 @@ def process_record(collection, record) -> None:
             msg = f"File not found: {path}"
             print(f"[Error] {msg}")
             collection.update_one(
-                {"_id": record_id},
-                {"$set": {"moves_error": msg, "updated_at": datetime.utcnow()}}
+                {"id": record_id},
+                {"$set": {"moves_error": msg, "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}}
             )
             return
 
@@ -113,11 +113,11 @@ def process_record(collection, record) -> None:
             cropped = crop_moves_region(img, CROP_BOX)
             moves_crop_path = save_cropped_image(cropped, record_id)
         update_fields = {
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         }
         if moves_crop_path:
             update_fields["moves_filepath"] = str(moves_crop_path)
-        collection.update_one({"_id": record_id}, {"$set": update_fields})
+            collection.update_one({"id": record_id}, {"$set": update_fields})
 
     except Exception as exc:
         print(f"[Error] processing {record_id}: {exc}")
@@ -125,7 +125,7 @@ def process_record(collection, record) -> None:
         collection.update_one(
             {"_id": record_id},
             {"$set": {
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             }}
         )
 

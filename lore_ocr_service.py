@@ -19,7 +19,7 @@ import time
 import argparse
 import traceback
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple
 import cv2
 import numpy as np
@@ -28,9 +28,7 @@ from pymongo.errors import PyMongoError
 from PIL import Image
 import pytesseract
 import re
-DEBUG_OCR = True
-DEBUG_OCR_DIR = Path("debug_ocr_inputs")
-DEBUG_OCR_DIR.mkdir(exist_ok=True)
+
 
 # Configuration
 POLL_INTERVAL = float(os.getenv("LORE_OCR_POLL_INTERVAL", "3"))
@@ -141,7 +139,7 @@ def ocr_image(image: Image.Image) -> str:
 
 
 def process_record(collection, record) -> None:
-    record_id = record.get("_id") or record.get("id")
+    record_id = record.get("id") or record.get("_id")
     filename = record.get("filename")
     filepath = record.get("filepath")
 
@@ -158,7 +156,7 @@ def process_record(collection, record) -> None:
             msg = f"File not found: {path}"
             print(f"[Error] {msg}")
             try:
-                collection.update_one({"_id": record_id}, {"$set": {"lore_error": msg, "updated_at": datetime.utcnow()}})
+                collection.update_one({"id": record_id}, {"$set": {"lore_error": msg, "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}})
             except Exception:
                 print("[DB] Failed to update missing-file error")
             return
@@ -173,16 +171,16 @@ def process_record(collection, record) -> None:
 
         if not lore_text:
             print(f"[OCR] No text extracted for {record_id}")
-            collection.update_one({"_id": record_id}, {"$set": {"lore": "", "lore_error": "ocr_empty", "updated_at": datetime.utcnow()}})
+            collection.update_one({"id": record_id}, {"$set": {"lore": "", "lore_error": "ocr_empty", "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}})
         else:
             print(f"[Extracted] {lore_text[:100]}")  # Truncate for logging
-            collection.update_one({"_id": record_id}, {"$set": {"lore": lore_text, "updated_at": datetime.utcnow()}})
+            collection.update_one({"id": record_id}, {"$set": {"lore": lore_text, "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}})
 
     except Exception as e:
         print(f"[Error] processing record {record_id}: {e}")
         traceback.print_exc()
         try:
-            collection.update_one({"_id": record_id}, {"$set": {"lore_error": str(e), "updated_at": datetime.utcnow()}})
+            collection.update_one({"id": record_id}, {"$set": {"lore_error": str(e), "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}})
         except Exception:
             print("[DB] Failed to update error field for record")
 

@@ -9,8 +9,8 @@ import threading
 import subprocess
 import sys
 from pathlib import Path
-from datetime import datetime
-from typing import Optional, Dict, Any
+from datetime import datetime, timezone
+from typing import Dict, Any
 from enum import Enum
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, status
@@ -233,19 +233,21 @@ async def upload_image(file: UploadFile = File(...)) -> JSONResponse:
             database = get_db()
             relative_filepath = str(filepath).replace("\\", "/")
             
+            now_utc = datetime.now(timezone.utc)
+            
             document = {
+                "_id": record_id,  # Use id as MongoDB _id
                 "id": record_id,
-                "_id": record_id,
                 "filename": file.filename,
                 "filepath": relative_filepath,
-                "uploaded": True,
+               # "uploaded": True,
                 "name": None,
                 "lore": None,
                 "weakness_filepath": None,
                 "resistance_filepath": None,
                 "moves_filepath": None,
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
+                "created_at": now_utc.strftime('%Y-%m-%d %H:%M:%S'),
+                "updated_at": now_utc.strftime('%Y-%m-%d %H:%M:%S')
             }
             
             result = database.pokemon_images.insert_one(document)
@@ -293,13 +295,17 @@ async def retrieve_image_data(record_id: str) -> JSONResponse:
     """
     try:
         database = get_db()
-        document = database.pokemon_images.find_one({"_id": record_id})
+        document = database.pokemon_images.find_one({"id": record_id})
         
         if document is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Record with ID '{record_id}' not found"
             )
+        
+        # Convert to dict and remove _id from response
+        document = dict(document)
+        document.pop("_id", None)
         
         # Convert datetime objects to ISO format strings
         if isinstance(document.get("created_at"), datetime):
@@ -333,11 +339,14 @@ async def update_record(record_id: str, updates: Dict[str, Any]) -> JSONResponse
     Returns:
         JSON response with updated metadata
     """
+
+    now_utc = datetime.now(timezone.utc)
+
     try:
         database = get_db()
         
         # Verify record exists
-        if database.pokemon_images.find_one({"_id": record_id}) is None:
+        if database.pokemon_images.find_one({"id": record_id}) is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Record with ID '{record_id}' not found"
@@ -359,16 +368,20 @@ async def update_record(record_id: str, updates: Dict[str, Any]) -> JSONResponse
             )
         
         # Add updated_at timestamp
-        filtered_updates["updated_at"] = datetime.utcnow()
+        filtered_updates["updated_at"] = now_utc.strftime('%Y-%m-%d %H:%M:%S')
         
         # Update document
         database.pokemon_images.update_one(
-            {"_id": record_id},
+            {"id": record_id},
             {"$set": filtered_updates}
         )
         
         # Fetch and return updated record
-        document = database.pokemon_images.find_one({"_id": record_id})
+        document = database.pokemon_images.find_one({"id": record_id})
+        
+        # Convert to dict and remove _id from response
+        document = dict(document)
+        document.pop("_id", None)
         
         # Convert datetime objects to ISO format strings
         if isinstance(document.get("created_at"), datetime):

@@ -19,7 +19,7 @@ import time
 import argparse
 import traceback
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple
 
 from pymongo import MongoClient
@@ -98,7 +98,7 @@ def ocr_image(image: Image.Image) -> str:
 
 
 def process_record(collection, record) -> None:
-    record_id = record.get("_id") or record.get("id")
+    record_id = record.get("id") or record.get("_id")
     filename = record.get("filename")
     filepath = record.get("filepath")
 
@@ -115,7 +115,7 @@ def process_record(collection, record) -> None:
             msg = f"File not found: {path}"
             print(f"[Error] {msg}")
             try:
-                collection.update_one({"_id": record_id}, {"$set": {"name_error": msg, "updated_at": datetime.utcnow()}})
+                collection.update_one({"id": record_id}, {"$set": {"name_error": msg, "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}})
             except Exception:
                 print("[DB] Failed to update missing-file error")
             return
@@ -126,8 +126,6 @@ def process_record(collection, record) -> None:
             # Detect card type
             detect_crop = img.crop((469, 36, 696, 64))
             is_trainer = "TRAINER" in pytesseract.image_to_string(detect_crop, config="--psm 6").lower()
-            print(f"DEBUG: Saving image to: {os.path.join(os.getcwd(), 'debug_trainer_zone.png')}")
-            detect_crop.save("debug_trainer_zone.png")
             # Select box (Use CROP_BOX if standard, or your trainer coords if detected)
             active_box = (32,76,700,135) if is_trainer else CROP_BOX
             
@@ -138,16 +136,16 @@ def process_record(collection, record) -> None:
 
         if not name_text:
             print(f"[OCR] No text extracted for {record_id}")
-            collection.update_one({"_id": record_id}, {"$set": {"name": "", "name_error": "ocr_empty", "updated_at": datetime.utcnow()}})
+            collection.update_one({"id": record_id}, {"$set": {"name": "", "name_error": "ocr_empty", "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}})
         else:
             print(f"[Extracted] {name_text}")
-            collection.update_one({"_id": record_id}, {"$set": {"name": name_text, "updated_at": datetime.utcnow()}})
+            collection.update_one({"id": record_id}, {"$set": {"name": name_text, "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}})
 
     except Exception as e:
         print(f"[Error] processing record {record_id}: {e}")
         traceback.print_exc()
         try:
-            collection.update_one({"_id": record_id}, {"$set": {"name_error": str(e), "updated_at": datetime.utcnow()}})
+            collection.update_one({"id": record_id}, {"$set": {"name_error": str(e), "updated_at": datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}})
         except Exception:
             print("[DB] Failed to update error field for record")
 
