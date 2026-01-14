@@ -1,6 +1,0 @@
-$env:MONGODB_URI="mongodb+srv://Acecryz:blink182@cluster0.xdacfkx.mongodb.net/pokemon_scanner" 
-
-py -m uvicorn api:app --reload --host 0.0.0.0 --port 8000 
-
-
-
